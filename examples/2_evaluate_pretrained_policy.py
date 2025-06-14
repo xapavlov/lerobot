@@ -37,7 +37,23 @@ output_directory = Path("outputs/eval/example_pusht_diffusion")
 output_directory.mkdir(parents=True, exist_ok=True)
 
 # Select your device
-device = "cuda"
+# Note: If you're experiencing NaN issues with MPS, you can force CPU by setting use_mps=False
+use_mps = False  # Set to False to avoid MPS compatibility issues with diffusion models
+device = (
+    "cuda"
+    if torch.cuda.is_available()
+    else "mps"
+    if (torch.backends.mps.is_available() and use_mps)
+    else "cpu"
+)
+print(f"Using device: {device}")
+
+# Show warning if MPS is available but not being used
+if torch.backends.mps.is_available() and not use_mps:
+    print(
+        "Note: MPS (Apple Silicon) is available but disabled due to compatibility issues with diffusion models."
+    )
+    print("Using CPU instead for stable performance.")
 
 # Provide the [hugging face repo id](https://huggingface.co/lerobot/diffusion_pusht):
 pretrained_policy_path = "lerobot/diffusion_pusht"
@@ -45,6 +61,10 @@ pretrained_policy_path = "lerobot/diffusion_pusht"
 # pretrained_policy_path = Path("outputs/train/example_pusht_diffusion")
 
 policy = DiffusionPolicy.from_pretrained(pretrained_policy_path)
+
+# Move the policy to the correct device
+policy = policy.to(device)
+policy.eval()
 
 # Initialize evaluation environment to render two observation types:
 # an image of the scene and state/position of the agent. The environment
@@ -79,6 +99,8 @@ frames.append(env.render())
 
 step = 0
 done = False
+previous_action = None  # Initialize for NaN handling
+
 while not done:
     # Prepare observation for the policy running in Pytorch
     state = torch.from_numpy(numpy_observation["agent_pos"])
@@ -110,6 +132,9 @@ while not done:
 
     # Prepare the action for the environment
     numpy_action = action.squeeze(0).to("cpu").numpy()
+
+    # Store the action for potential reuse
+    previous_action = numpy_action.copy()
 
     # Step through the environment and receive a new observation
     numpy_observation, reward, terminated, truncated, info = env.step(numpy_action)
